@@ -49,8 +49,8 @@ async function recognizeSanskritText(base64ImageData) {
 
     console.log("Attempting to recognize image...");
 
-    // The user prompt guides the model to perform OCR on the Sanskrit handwriting
-    const userPrompt = "Please perform Optical Character Recognition (OCR) on the handwriting in this image. The content is Sanskrit text written in the Devanagari script. Transcribe ONLY the recognized Sanskrit text (Devanagari characters) and nothing else. If you cannot recognize it, reply with 'Recognition Failed'.";
+    // UPDATED PROMPT: Instruct the model to return a specific token 'NO_TEXT' on failure.
+    const userPrompt = "Please perform Optical Character Recognition (OCR) on the handwriting in this image. The content is Sanskrit text written in the Devanagari script. Transcribe ONLY the recognized Sanskrit text (Devanagari characters) and nothing else. If you cannot recognize any text, reply with the token 'NO_TEXT'.";
 
     const payload = {
         contents: [
@@ -96,15 +96,17 @@ async function recognizeSanskritText(base64ImageData) {
         }
 
         // CHECK 2: Extract the text from the API response
-        const recognizedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        let recognizedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
         
         if (recognizedText) {
-            console.log(`Recognition Result: ${recognizedText}`);
             
-            // Critical: If the model itself returns the 'Recognition Failed' string, we should log it but pass it through.
-            if (recognizedText.includes("Recognition Failed")) {
-                console.warn("Model explicitly failed to recognize the image content.");
+            // Handle the specific NO_TEXT failure token
+            if (recognizedText.trim() === 'NO_TEXT') {
+                 console.warn("Model explicitly failed to recognize the image content and returned NO_TEXT.");
+                 return "Recognition Failed: Illegible handwriting or blank area.";
             }
+
+            console.log(`Recognition Result: ${recognizedText}`);
             return recognizedText;
             
         } else {
