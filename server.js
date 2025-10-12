@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.GEMINI_API_KEY || '';
 
 // FIX 1: Updated to use a valid Gemini model name
-// Use gemini-1.5-flash or gemini-1.5-pro instead of the non-existent model
-const MODEL_NAME = 'gemini-1.5-flash-latest'; // or 'gemini-1.5-pro-latest'
+// Valid models: gemini-1.5-flash, gemini-1.5-pro, gemini-1.0-pro-vision-latest
+const MODEL_NAME = 'gemini-1.5-flash'; // Fast and efficient for vision tasks
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`;
 
 if (!API_KEY) {
