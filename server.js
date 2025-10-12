@@ -41,6 +41,12 @@ async function recognizeSanskritText(base64ImageData) {
         return "Recognition Failed: API Key Missing.";
     }
     
+    // NEW CHECK: Prevent API call on blank canvas
+    if (base64ImageData.length < 5000) { // Base64 length check (adjusting threshold higher for safer check)
+        console.warn("Image data is very small. User likely submitted a blank or near-blank canvas.");
+        return "Recognition Failed: Please write clearly (ensure dark, thick lines) before recognizing.";
+    }
+
     console.log("Attempting to recognize image...");
 
     // The user prompt guides the model to perform OCR on the Sanskrit handwriting
@@ -86,7 +92,6 @@ async function recognizeSanskritText(base64ImageData) {
             if (response.status === 429) {
                 return "Recognition Failed: Rate Limit Exceeded (Too many requests).";
             }
-            // Return a general error message with status code for client display
             return `Recognition Failed: HTTP Error ${response.status}. See server logs for details.`;
         }
 
@@ -95,7 +100,13 @@ async function recognizeSanskritText(base64ImageData) {
         
         if (recognizedText) {
             console.log(`Recognition Result: ${recognizedText}`);
+            
+            // Critical: If the model itself returns the 'Recognition Failed' string, we should log it but pass it through.
+            if (recognizedText.includes("Recognition Failed")) {
+                console.warn("Model explicitly failed to recognize the image content.");
+            }
             return recognizedText;
+            
         } else {
             console.error("Recognition Failed: API Response missing text candidate.", JSON.stringify(result));
             return "Recognition Failed: Model failed to process input or response structure invalid.";
