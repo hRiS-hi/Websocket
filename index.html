@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Shared Canvas</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        /* Custom CSS for the canvas container */
+        #canvas-container {
+            border: 2px solid #e2e8f0;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            background-color: white;
+            touch-action: none; /* Prevents unwanted browser actions like pull-to-refresh on mobile */
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex flex-col items-center min-h-screen">
+
+    <div class="w-full max-w-4xl space-y-6">
+
+        <h1 class="text-3xl font-bold text-gray-800 text-center">
+            Shared Canvas Sync <span class="text-blue-600"></span>
+        </h1>
+        <p class="text-center text-gray-500">
+            Draw on your device and watch it appear instantly on others!
+        </p>
+
+        <!-- Session Controls and Info -->
+        <div class="bg-white p-4 rounded-xl shadow-lg border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div id="session-info" class="text-sm font-medium text-gray-700 w-full md:w-auto flex flex-col sm:flex-row items-center gap-2">
+                <span class="text-gray-500">Session ID:</span>
+                <span id="session-id-display" class="bg-gray-100 px-3 py-1 rounded-full text-blue-600 font-mono text-xs">Loading...</span>
+            </div>
+
+            <div class="flex flex-wrap gap-2 justify-center">
+                <input type="color" id="color-picker" value="#000000" class="w-10 h-10 p-1 rounded-md border-2 border-gray-300 cursor-pointer">
+                <select id="line-width" class="p-2 border border-gray-300 rounded-lg text-sm bg-white hover:bg-gray-50 transition">
+                    <option value="5">5px</option>
+                    <option value="10" selected>10px (Default)</option>
+                    <option value="20">20px</option>
+                    <option value="40">40px</option>
+                </select>
+                <button id="clear-canvas-btn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition shadow-md flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Clear Canvas
+                </button>
+                <button id="share-id-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-md flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6.632l6.632-3.316m0 0a3 3 0 105.364-2.684 3 3 0 00-5.364 2.684zM17.316 16.658a3 3 0 105.364 2.684 3 3 0 00-5.364-2.684z"></path></svg>
+                    Copy ID
+                </button>
+                <button id="join-session-btn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition shadow-md">
+                    Join Session
+                </button>
+            </div>
+        </div>
+
+        <!-- Canvas -->
+        <div id="canvas-container" class="w-full aspect-square md:aspect-[3/2]">
+            <canvas id="drawing-canvas"></canvas>
+        </div>
+
+        <!-- Status Message Box (Replaces alert()) -->
+        <div id="message-box" class="fixed bottom-4 right-4 bg-yellow-400 text-gray-800 p-3 rounded-lg shadow-xl hidden transition-opacity duration-300"></div>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, addDoc, updateDoc, query, orderBy, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Enable Firestore debugging
+        setLogLevel('Debug');
+
+        // --- GLOBAL FIREBASE/APP VARIABLES (MANDATORY) ---
+        // Provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-canvas-sync-app';
+        
+        // Define a safe fallback config in case the environment variable is missing or empty
+        const defaultFirebaseConfig = { projectId: 'gemini-canvas-fallback-1234' };
+        let parsedConfig = {};
+        try {
+            // Attempt to parse the environment variable __firebase_config
+            parsedConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        } catch (e) {
+            console.error("Failed to parse __firebase_config:", e);
+        }
+        
+        // Use the parsed config if it has a projectId, otherwise use the default fallback
+        const firebaseConfig = parsedConfig && parsedConfig.projectId ? parsedConfig : defaultFirebaseConfig;
+
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = 'loading'; // Will be set after auth
+        let currentSessionId = null;
+        let unsubscribeSnapshot = null; // Holds the snapshot listener function
+
+        // --- CANVAS & DRAWING VARIABLES ---
+        const canvas = document.getElementById('drawing-canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasContainer = document.getElementById('canvas-container');
+
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let strokes = []; // Local cache of all strokes
+        let currentStroke = null;
+        
+        // UI elements
+        const colorPicker = document.getElementById('color-picker');
+        const lineWidthSelect = document.getElementById('line-width');
+        const sessionIdDisplay = document.getElementById('session-id-display');
+        const messageBox = document.getElementById('message-box');
+        const clearBtn = document.getElementById('clear-canvas-btn');
+        const shareBtn = document.getElementById('share-id-btn');
+        const joinBtn = document.getElementById('join-session-btn');
+
+
+        // --- UTILITY FUNCTIONS ---
+
+        /** Shows a temporary message box instead of alert() */
+        function showMessage(message, duration = 3000, isError = false) {
+            messageBox.textContent = message;
+            messageBox.className = `fixed bottom-4 right-4 p-3 rounded-lg shadow-xl transition-opacity duration-300 opacity-100 ${isError ? 'bg-red-500 text-white' : 'bg-yellow-400 text-gray-800'}`;
+            messageBox.style.display = 'block';
+
+            setTimeout(() => {
+                messageBox.classList.remove('opacity-100');
+                messageBox.classList.add('opacity-0');
+                setTimeout(() => { messageBox.style.display = 'none'; }, 300);
+            }, duration);
+        }
+
+        /** Converts canvas coordinates from event to local coordinates */
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+
+            // Handle touch events
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                // Handle mouse events
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            return {
+                x: (clientX - rect.left) / rect.width, // Normalized X (0 to 1)
+                y: (clientY - rect.top) / rect.height  // Normalized Y (0 to 1)
+            };
+        }
+
+        /** Redraws the entire canvas based on the stored strokes array */
+        function redrawCanvas() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Redraw every stroke
+            strokes.forEach(stroke => {
+                if (stroke.points.length < 2) return;
+
+                ctx.beginPath();
+                // Set drawing styles (using absolute pixel values for width, not normalized)
+                ctx.strokeStyle = stroke.color;
+                ctx.lineWidth = stroke.width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                // Move to the first point
+                let p1 = stroke.points[0];
+                ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+
+                // Draw lines to subsequent points
+                for (let i = 1; i < stroke.points.length; i++) {
+                    let p2 = stroke.points[i];
+                    ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+                }
+                ctx.stroke();
+            });
+        }
+
+        /** Resizes canvas to fit container and redraws content */
+        function resizeCanvas() {
+            const width = canvasContainer.clientWidth;
+            const height = canvasContainer.clientHeight;
+
+            // Set the canvas rendering size and actual element size
+            canvas.width = width;
+            canvas.height = height;
+
+            // Immediately redraw content to fit new size
+            redrawCanvas();
+        }
+
+        // --- FIREBASE AND SYNC FUNCTIONS ---
+
+        /** Initializes Firebase and sets up authentication */
+        async function initializeFirebase() {
+            try {
+                // The firebaseConfig variable is now guaranteed to have a projectId (either real or fallback),
+                // so we can initialize the app without crashing.
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Show warning if fallback config was used
+                if (firebaseConfig.projectId === defaultFirebaseConfig.projectId) {
+                    showMessage('Database connection details are missing or invalid. Using fallback configuration. Features requiring live sync may fail.', 8000, true);
+                }
+
+                // Sign in using the custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        // Automatically start a new session or check URL for existing one
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const idFromUrl = urlParams.get('session');
+
+                        if (idFromUrl) {
+                            startSession(idFromUrl);
+                        } else {
+                            // If no session in URL, check if a session ID is saved locally
+                            const savedId = localStorage.getItem('lastSessionId');
+                            if (savedId) {
+                                startSession(savedId);
+                            } else {
+                                createNewSession();
+                            }
+                        }
+                    } else {
+                        showMessage('Authentication failed.', 5000, true);
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                showMessage(`Firebase Error: ${error.message}`, 8000, true);
+            }
+        }
+
+        /** Creates a new session document in Firestore */
+        async function createNewSession() {
+            if (!db) {
+                showMessage('Database is not initialized. Cannot create a new session.', 5000, true);
+                return;
+            }
+            const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'canvas_sync');
+            try {
+                // Add a document with initial data
+                const newDocRef = await addDoc(collectionRef, {
+                    strokes: [],
+                    createdAt: Date.now(),
+                    ownerId: userId
+                });
+                startSession(newDocRef.id);
+            } catch (error) {
+                console.error("Error creating new session:", error);
+                showMessage('Could not create new session. Check console for database errors.', 5000, true);
+            }
+        }
+        
+        /** Starts listening to a specific session ID */
+        async function startSession(sessionId) {
+            if (!db) {
+                 showMessage('Database not ready. Please wait.', 3000, true);
+                 return;
+            }
+
+            // Clean up previous listener if it exists
+            if (unsubscribeSnapshot) {
+                unsubscribeSnapshot();
+            }
+
+            currentSessionId = sessionId;
+            localStorage.setItem('lastSessionId', sessionId); // Save for next time
+            sessionIdDisplay.textContent = sessionId;
+
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'canvas_sync', sessionId);
+            
+            // Set up the real-time listener (simulating WebSocket connection)
+            unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const newStrokes = data.strokes || [];
+                    
+                    // Only update and redraw if the received strokes are different
+                    // This simple check prevents local redraw caused by local save, but allows remote updates
+                    const currentStrokesJson = JSON.stringify(strokes);
+                    const newStrokesJson = JSON.stringify(newStrokes);
+
+                    if (currentStrokesJson !== newStrokesJson) {
+                         // Update local cache and redraw
+                        strokes = newStrokes;
+                        redrawCanvas();
+                        console.log('Canvas updated from remote source.');
+                        showMessage('Drawing received from collaborator!', 1500);
+                    }
+
+                } else {
+                    console.error("Session document does not exist.");
+                    // Check if we are trying to load a non-existent document while joining a session
+                    if (currentSessionId === sessionId) {
+                         showMessage('Session ID not found. Creating a new one instead.', 5000, true);
+                         createNewSession();
+                    }
+                }
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                showMessage('Real-time connection failed. Check your network or database rules.', 5000, true);
+            });
+
+            // NOTE: Removed history.pushState code that caused SecurityError in blob environment.
+
+            showMessage(`Session ${sessionId} connected!`, 2000);
+        }
+
+        /** Saves the current local strokes array to Firestore */
+        async function saveAllStrokes() {
+            if (!db || !currentSessionId) return;
+
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'canvas_sync', currentSessionId);
+            try {
+                // Save the entire array of strokes
+                await setDoc(docRef, { strokes: strokes }, { merge: true });
+                console.log('Strokes saved to Firestore.');
+            } catch (error) {
+                console.error("Error saving strokes:", error);
+                showMessage('Failed to save stroke. Check connection.', 3000, true);
+            }
+        }
+
+        // --- DRAWING EVENT HANDLERS (Mouse/Touch) ---
+
+        function startDrawing(e) {
+            e.preventDefault(); // Prevent scrolling/zoom on mobile
+            if (!currentSessionId) {
+                showMessage('Please create or join a session first!', 3000, true);
+                return;
+            }
+
+            isDrawing = true;
+            const { x, y } = getCanvasCoords(e);
+
+            currentStroke = {
+                color: colorPicker.value,
+                width: parseInt(lineWidthSelect.value, 10),
+                points: [{ x, y }] // Start with the first point
+            };
+
+            // Set lastX/lastY for rendering only (normalized)
+            lastX = x;
+            lastY = y;
+        }
+
+        function draw(e) {
+            e.preventDefault();
+            if (!isDrawing) return;
+
+            const { x, y } = getCanvasCoords(e);
+
+            // Add the new point to the current stroke data structure
+            currentStroke.points.push({ x, y });
+
+            // --- IMMEDIATE LOCAL RENDER (So drawing feels instant) ---
+            ctx.beginPath();
+            ctx.strokeStyle = currentStroke.color;
+            ctx.lineWidth = currentStroke.width;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Scale normalized coordinates to canvas pixels for drawing
+            const startX = lastX * canvas.width;
+            const startY = lastY * canvas.height;
+            const endX = x * canvas.width;
+            const endY = y * canvas.height;
+
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            // Update lastX/lastY for the next segment
+            lastX = x;
+            lastY = y;
+        }
+
+        function stopDrawing() {
+            if (!isDrawing || !currentStroke) return;
+            isDrawing = false;
+            
+            // Push the completed stroke to the global stroke array
+            strokes.push(currentStroke);
+            
+            // Save the updated strokes array to Firestore
+            saveAllStrokes();
+
+            currentStroke = null;
+        }
+
+        // --- UI BINDINGS ---
+
+        // Clear button handler
+        clearBtn.addEventListener('click', async () => {
+            if (!currentSessionId) return;
+            // Clear local array and save to Firestore, which triggers redraw everywhere
+            strokes = [];
+            redrawCanvas(); // Immediate local clear
+            await saveAllStrokes();
+            showMessage('Canvas cleared!', 2000);
+        });
+
+        // Share button handler
+        shareBtn.addEventListener('click', () => {
+            if (currentSessionId) {
+                const sessionUrl = new URL(window.location.href);
+                sessionUrl.searchParams.set('session', currentSessionId);
+                // We copy the URL including the session parameter to enable sharing.
+                // NOTE: document.execCommand('copy') is a reliable fallback for older browsers in iframes
+                // but we rely on navigator.clipboard.writeText for modern support.
+                navigator.clipboard.writeText(sessionUrl.href).then(() => {
+                    showMessage('Session Link copied to clipboard! Share it with a friend.', 3000);
+                }).catch(err => {
+                    console.error('Could not copy text: ', err);
+                    // Use fallback copy method if clipboard API fails
+                    try {
+                         // Create temporary input element
+                        const tempInput = document.createElement('input');
+                        tempInput.value = sessionUrl.href;
+                        document.body.appendChild(tempInput);
+                        tempInput.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(tempInput);
+                        showMessage('Session Link copied using fallback method!', 3000);
+                    } catch (e) {
+                        showMessage('Failed to copy. ID: ' + currentSessionId, 4000, true);
+                    }
+                });
+            } else {
+                showMessage('Session not ready yet.', 2000);
+            }
+        });
+
+        // Join button handler
+        joinBtn.addEventListener('click', async () => {
+            const input = prompt("Enter the Session ID (e.g., URL or code) you want to join:");
+            if (input) {
+                let sessionIdToJoin = input.trim();
+                
+                // If user pastes the whole URL, extract the ID
+                if (sessionIdToJoin.includes('session=')) {
+                    try {
+                        const url = new URL(sessionIdToJoin);
+                        sessionIdToJoin = url.searchParams.get('session');
+                    } catch (e) {
+                        // ignore if not a valid URL
+                    }
+                }
+                
+                if (sessionIdToJoin) {
+                    await startSession(sessionIdToJoin);
+                } else {
+                    showMessage('Invalid Session ID/URL provided.', 3000, true);
+                }
+            }
+        });
+
+
+        // --- INITIALIZATION ---
+
+        window.onload = () => {
+            // Set initial size and set up resize listener
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Mouse events
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing); // Stop drawing if mouse leaves canvas
+
+            // Touch events (Crucial for mobile synchronization)
+            canvas.addEventListener('touchstart', startDrawing);
+            canvas.addEventListener('touchmove', draw);
+            canvas.addEventListener('touchend', stopDrawing);
+            canvas.addEventListener('touchcancel', stopDrawing);
+
+            // Start the Firebase setup
+            initializeFirebase();
+        };
+
+    </script>
+</body>
+</html>
