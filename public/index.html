@@ -3,129 +3,157 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-Time Collaborative Canvas</title>
+    <title>Sanskrit Handwriting Recognition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Use Inter font and ensure full screen, no margin/padding */
         body {
             font-family: 'Inter', sans-serif;
             margin: 0;
             padding: 0;
-            overflow: hidden; /* Prevent scrolling */
             background-color: #0f172a; /* Slate-900 background */
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-start;
             height: 100vh;
         }
-        /* Canvas should take most of the viewport height */
         #drawingCanvas {
-            border: 2px solid #3b82f6; /* Blue border */
-            border-radius: 0.75rem; /* rounded-xl */
+            border: 2px solid #3b82f6;
+            border-radius: 0.75rem;
             box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
             touch-action: none; /* Crucial for better mobile drawing handling */
             background-color: white;
-            /* On desktop/tablet, limit max width for better centering */
+            /* Responsive sizing */
             max-width: 90vw;
-            max-height: 70vh;
+            flex-grow: 1; /* Allow it to take up space */
+            margin-bottom: 1rem;
         }
         .controls-bar {
-            background-color: #1e293b; /* Slate-800 */
+            background-color: #1e293b;
             padding: 1rem;
             border-radius: 0.75rem;
-            margin-top: 1rem;
+            margin-bottom: 1rem;
             width: 90%;
             max-width: 600px;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+        #recognizedText {
+            min-height: 8rem;
+            border: 2px solid #6366f1; /* Indigo-500 */
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            font-size: 1.5rem;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 90%;
+            max-width: 800px;
+        }
+        .text-section {
+            width: 90%;
+            max-width: 800px;
+            margin-top: 1rem;
         }
     </style>
 </head>
 <body>
 
     <div class="p-4 text-center">
-        <h1 class="text-2xl font-bold text-white mb-1">Live Canvas Mirror</h1>
-        <p id="status-message" class="text-sm text-gray-400"></p>
+        <h1 class="text-2xl font-bold text-white mb-1">Sanskrit Handwriting Recognizer</h1>
+        <p id="status-message" class="text-sm text-gray-400">Mobile: Write in Devanagari. Desktop: Watch the recognized text.</p>
     </div>
 
     <!-- The Drawing Canvas -->
     <canvas id="drawingCanvas"></canvas>
 
-    <!-- Controls for Color and Clear -->
-    <div class="controls-bar flex justify-center items-center space-x-4">
-        <input type="color" id="colorPicker" value="#000000" class="w-8 h-8 rounded-full border-2 border-white cursor-pointer" title="Select Color">
-        <select id="sizeSelect" class="p-2 rounded-lg bg-slate-700 text-white border border-slate-600 focus:ring-blue-500 focus:border-blue-500 text-sm">
-            <option value="5">Thin (5)</option>
-            <option value="10" selected>Medium (10)</option>
-            <option value="20">Thick (20)</option>
-            <option value="30">Heavy (30)</option>
-        </select>
+    <!-- Controls -->
+    <div class="controls-bar">
+        <button id="recognizeButton" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-lg flex items-center justify-center">
+            <svg id="loadingSpinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Recognize Sanskrit
+        </button>
         <button id="clearButton" class="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition duration-150 shadow-lg">
-            Clear Canvas
+            Clear
         </button>
     </div>
 
-    <script>
-        // --- Configuration ---
-        // IMPORTANT: Replace this placeholder with your deployed Render URL.
-        // Use 'wss://' for secure connections. The server will run on 'wss://[your-app-name].onrender.com'
-        // For local testing, use 'ws://localhost:8080'
-        const WS_SERVER_URL = 'ws://' + window.location.host; // Use relative path for same-domain deployment
+    <!-- Recognized Text Display -->
+    <div class="text-section">
+        <p class="text-gray-400 text-sm mb-2">Recognized Text:</p>
+        <div id="recognizedText" class="text-3xl">
+            Draw some Devanagari characters above and press 'Recognize Sanskrit'.
+        </div>
+    </div>
 
-        // --- DOM Elements and State ---
+
+    <script>
+        // --- Configuration & State ---
+        // Since the client is served by the same Node server, we use relative WebSocket URL
+        const WS_SERVER_URL = window.location.host; 
+
         const canvas = document.getElementById('drawingCanvas');
         const ctx = canvas.getContext('2d');
         const statusMessage = document.getElementById('status-message');
+        const recognizeButton = document.getElementById('recognizeButton');
         const clearButton = document.getElementById('clearButton');
-        const colorPicker = document.getElementById('colorPicker');
-        const sizeSelect = document.getElementById('sizeSelect');
+        const recognizedTextDisplay = document.getElementById('recognizedText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
 
         let ws;
         let isDrawing = false;
         let lastX = 0;
         let lastY = 0;
-        let currentColor = colorPicker.value;
-        let currentSize = parseInt(sizeSelect.value);
+        const DRAW_COLOR = '#000000';
+        const DRAW_SIZE = 20;
 
-        // --- Canvas Initialization ---
+        // --- Canvas Initialization and Resizing ---
         function resizeCanvas() {
-            // Adjust canvas size to fit screen while maintaining aspect ratio or filling container
-            const containerWidth = window.innerWidth * 0.9;
-            const containerHeight = window.innerHeight * 0.7;
-
             // Set the canvas rendering size (high resolution for sharp drawing)
             canvas.width = 1200;
-            canvas.height = 800;
+            canvas.height = 600;
 
             // Set the canvas CSS size (visible size on screen)
-            canvas.style.width = Math.min(containerWidth, canvas.width) + 'px';
-            canvas.style.height = Math.min(containerHeight, canvas.height) + 'px';
+            canvas.style.width = '100%';
+            canvas.style.height = 'auto'; 
+            canvas.style.maxWidth = '600px';
 
-            // Reset drawing styles after resize
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
+            ctx.strokeStyle = DRAW_COLOR;
+            ctx.lineWidth = DRAW_SIZE;
         }
 
         window.addEventListener('resize', resizeCanvas);
         window.addEventListener('load', resizeCanvas);
 
+
         // --- WebSocket Connection Logic ---
         function connectWebSocket() {
-            // Try to connect using secure protocol if running on HTTPS
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const url = protocol + window.location.host;
+            const url = protocol + WS_SERVER_URL;
 
             ws = new WebSocket(url);
 
             ws.onopen = () => {
-                statusMessage.textContent = 'Status: Connected to Server. Start drawing on your mobile!';
-                statusMessage.classList.remove('text-red-400');
+                statusMessage.textContent = 'Status: Connected to Server.';
+                statusMessage.classList.remove('text-red-400', 'text-yellow-400');
                 statusMessage.classList.add('text-green-400');
             };
 
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    handleRemoteDraw(data);
+                    if (data.type === 'recognized_text') {
+                        handleRecognizedText(data.text);
+                    }
                 } catch (e) {
                     console.error('Failed to parse incoming message:', e);
                 }
@@ -135,64 +163,22 @@
                 statusMessage.textContent = 'Status: Disconnected. Reconnecting in 5s...';
                 statusMessage.classList.remove('text-green-400');
                 statusMessage.classList.add('text-red-400');
-                setTimeout(connectWebSocket, 5000); // Attempt to reconnect
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket Error:', error);
+                setTimeout(connectWebSocket, 5000); 
             };
         }
 
         // --- Drawing Functionality ---
 
-        // Draw a line segment on the canvas
-        function drawLine(x1, y1, x2, y2, color, size) {
+        // Draw a line segment locally
+        function drawLine(x1, y1, x2, y2) {
             // Scale coordinates from the CSS client size to the internal canvas resolution
             const scaleX = canvas.width / canvas.offsetWidth;
             const scaleY = canvas.height / canvas.offsetHeight;
             
             ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = size;
             ctx.moveTo(x1 * scaleX, y1 * scaleY);
             ctx.lineTo(x2 * scaleX, y2 * scaleY);
             ctx.stroke();
-        }
-
-        // Send drawing data to the server
-        function sendDrawData(type, x, y, color, size) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const data = JSON.stringify({
-                    type: type,
-                    x: x,
-                    y: y,
-                    lastX: lastX,
-                    lastY: lastY,
-                    color: color,
-                    size: size
-                });
-                ws.send(data);
-            }
-        }
-
-        // Handle remote drawing commands received from the server
-        function handleRemoteDraw(data) {
-            // Note: Remote data is already relative to the sender's screen, 
-            // but we treat the coordinates as canvas-relative for simplicity here.
-            // The key is that the coordinate system is consistent across drawLine calls.
-            if (data.type === 'start') {
-                // Set the starting point for the remote draw
-                lastX = data.x;
-                lastY = data.y;
-            } else if (data.type === 'draw') {
-                drawLine(data.lastX, data.lastY, data.x, data.y, data.color, data.size);
-                // Update the last position for the next segment
-                lastX = data.x;
-                lastY = data.y;
-            } else if (data.type === 'clear') {
-                // Clear the canvas upon receiving a clear command
-                clearCanvasLocally();
-            }
         }
 
         function clearCanvasLocally() {
@@ -203,17 +189,12 @@
 
         function getCanvasPosition(e) {
             const rect = canvas.getBoundingClientRect();
-            // Get the touch point or mouse position relative to the viewport
             const clientX = e.clientX || e.touches[0].clientX;
             const clientY = e.clientY || e.touches[0].clientY;
             
-            // Calculate coordinates relative to the canvas CSS size (offsetWidth/Height)
+            // Coordinates relative to the canvas CSS size
             const x = clientX - rect.left;
             const y = clientY - rect.top;
-
-            // Normalize the coordinates to be a percentage or ratio of the CSS size,
-            // but here we just use the coordinate relative to the CSS dimensions.
-            // drawLine will handle the internal canvas resolution scaling.
             return { x, y };
         }
 
@@ -222,12 +203,8 @@
             isDrawing = true;
             const { x, y } = getCanvasPosition(e);
             
-            // Initial position (scaled to CSS size)
             lastX = x; 
             lastY = y; 
-
-            // Send 'start' event
-            sendDrawData('start', x, y, currentColor, currentSize);
         }
 
         function moveDraw(e) {
@@ -235,13 +212,9 @@
             e.preventDefault();
             const { x, y } = getCanvasPosition(e);
 
-            // Draw locally on the current device
-            drawLine(lastX, lastY, x, y, currentColor, currentSize);
+            // Draw locally
+            drawLine(lastX, lastY, x, y);
             
-            // Send 'draw' event
-            sendDrawData('draw', x, y, currentColor, currentSize);
-
-            // Update last position
             lastX = x;
             lastY = y;
         }
@@ -251,34 +224,56 @@
         }
 
         // Attach listeners
-        // Mouse Events (Desktop/Simulated Mobile)
         canvas.addEventListener('mousedown', startDraw);
         canvas.addEventListener('mousemove', moveDraw);
         canvas.addEventListener('mouseup', endDraw);
         canvas.addEventListener('mouseout', endDraw);
-
-        // Touch Events (Mobile)
         canvas.addEventListener('touchstart', startDraw);
         canvas.addEventListener('touchmove', moveDraw);
         canvas.addEventListener('touchend', endDraw);
         canvas.addEventListener('touchcancel', endDraw);
 
-        // Control handlers
         clearButton.addEventListener('click', () => {
             clearCanvasLocally();
+            recognizedTextDisplay.textContent = 'Draw some Devanagari characters above and press \'Recognize Sanskrit\'.';
+        });
+
+        // --- Recognition Logic ---
+
+        function setRecognitionState(isRecognizing) {
+            recognizeButton.disabled = isRecognizing;
+            loadingSpinner.classList.toggle('hidden', !isRecognizing);
+            recognizeButton.textContent = isRecognizing ? 'Recognizing...' : 'Recognize Sanskrit';
+        }
+
+        recognizeButton.addEventListener('click', () => {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                // Send a clear command to all other clients
-                ws.send(JSON.stringify({ type: 'clear' }));
+                // 1. Convert Canvas to Base64 Image
+                const base64Image = canvas.toDataURL('image/png');
+                
+                // 2. Send the image to the server for recognition
+                ws.send(JSON.stringify({ 
+                    type: 'recognize_image', 
+                    image: base64Image 
+                }));
+                
+                // 3. Update UI
+                recognizedTextDisplay.textContent = 'Sending image for recognition...';
+                setRecognitionState(true);
+
+            } else {
+                recognizedTextDisplay.textContent = 'Error: WebSocket not connected.';
             }
         });
 
-        colorPicker.addEventListener('change', (e) => {
-            currentColor = e.target.value;
-        });
+        function handleRecognizedText(text) {
+            setRecognitionState(false);
+            recognizedTextDisplay.textContent = text;
+            
+            // OPTIONAL: Clear the canvas after successful recognition
+            clearCanvasLocally();
+        }
 
-        sizeSelect.addEventListener('change', (e) => {
-            currentSize = parseInt(e.target.value);
-        });
 
         // Start the application
         connectWebSocket();
