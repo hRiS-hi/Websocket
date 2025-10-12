@@ -1,15 +1,13 @@
 {
-  "name": "websocket-test-app",
-  "description": "Cross Device Communication using WebSockets",
+  "name": "realtime-canvas-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for real-time canvas drawing.",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
-  "main": "index.js",
-  "license": "ISC",
   "dependencies": {
-    "express": "^4.16.2",
-    "node-fetch": "^2.7.0",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
   }
 }
