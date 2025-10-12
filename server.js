@@ -42,7 +42,8 @@ async function recognizeSanskritText(base64ImageData) {
     }
     
     // NEW CHECK: Prevent API call on blank canvas
-    if (base64ImageData.length < 5000) { // Base64 length check (adjusting threshold higher for safer check)
+    // Increased threshold to 10000 bytes to be more aggressive in catching minimal drawing submissions.
+    if (base64ImageData.length < 10000) { 
         console.warn("Image data is very small. User likely submitted a blank or near-blank canvas.");
         return "Recognition Failed: Please write clearly (ensure dark, thick lines) before recognizing.";
     }
