@@ -10,7 +10,10 @@ const API_KEY = process.env.GEMINI_API_KEY || ''; // Read API key from Render En
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${API_KEY}`;
 
 if (!API_KEY) {
+    // RESTORING API KEY CHECK LOGIC for better startup visibility
     console.error("FATAL: GEMINI_API_KEY environment variable not set. Recognition will fail.");
+} else {
+    console.log("INFO: GEMINI_API_KEY successfully loaded."); 
 }
 
 const app = express();
@@ -31,8 +34,13 @@ const server = app.listen(PORT, () => {
 // 5. Initialize WebSocket Server
 const wss = new WebSocketServer({ server });
 
-// 6. Function to call Gemini Vision API
+// 6. Function to call Gemini Vision API with robust error handling
 async function recognizeSanskritText(base64ImageData) {
+    if (!API_KEY) {
+        console.error("API Key is missing at call time. Check Render configuration.");
+        return "Recognition Failed: API Key Missing.";
+    }
+    
     console.log("Attempting to recognize image...");
 
     // The user prompt guides the model to perform OCR on the Sanskrit handwriting
@@ -69,15 +77,33 @@ async function recognizeSanskritText(base64ImageData) {
 
         const result = await response.json();
         
-        // Extract the text from the API response
-        const recognizedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Recognition Failed: API Response Empty";
+        // CHECK 1: Handle non-2xx HTTP status codes (e.g., 400, 403, 429)
+        if (!response.ok) {
+            console.error(`API Request Failed (HTTP ${response.status}):`, result.error || JSON.stringify(result));
+            if (response.status === 400 && result.error?.message.includes("API key not valid")) {
+                return "Recognition Failed: Invalid GEMINI_API_KEY.";
+            }
+            if (response.status === 429) {
+                return "Recognition Failed: Rate Limit Exceeded (Too many requests).";
+            }
+            // Return a general error message with status code for client display
+            return `Recognition Failed: HTTP Error ${response.status}. See server logs for details.`;
+        }
+
+        // CHECK 2: Extract the text from the API response
+        const recognizedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
         
-        console.log(`Recognition Result: ${recognizedText}`);
-        return recognizedText;
+        if (recognizedText) {
+            console.log(`Recognition Result: ${recognizedText}`);
+            return recognizedText;
+        } else {
+            console.error("Recognition Failed: API Response missing text candidate.", JSON.stringify(result));
+            return "Recognition Failed: Model failed to process input or response structure invalid.";
+        }
 
     } catch (error) {
-        console.error("Error during Gemini API call:", error);
-        return "Recognition Failed: Server Error.";
+        console.error("Error during Gemini API call (Network/Parse):", error);
+        return "Recognition Failed: Server Network Error or JSON Parse Failure.";
     }
 }
 
