@@ -1,186 +1,98 @@
-// --- WebSocket Server for Sanskrit Handwriting Recognition (Updated to Official API Format) ---
+// --- WebSocket Server for Sanskrit Handwriting Recognition using OCR.space ---
 
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const path = require('path');
+const fetch = require('node-fetch'); // We need to ensure 'node-fetch' is available for API calls
 
 // 1. Initialize Express App and Configuration
 const PORT = process.env.PORT || 8080;
-const API_KEY = process.env.GEMINI_API_KEY || '';
+const OCR_API_KEY = process.env.OCR_API_KEY || ''; // Read API key from Render Environment Variable
+const OCR_API_URL = 'https://api.ocr.space/parse/image';
 
-// Using the correct model name from official documentation
-const MODEL_NAME = 'gemini-2.5-flash'; // Latest model with best vision capabilities
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`;
-
-if (!API_KEY) {
-    console.error("FATAL: GEMINI_API_KEY environment variable not set. Recognition will fail.");
-    console.error("Set it with: export GEMINI_API_KEY='your-api-key-here'");
+if (!OCR_API_KEY) {
+    console.error("FATAL: OCR_API_KEY environment variable not set. Recognition will fail.");
 } else {
-    console.log("✓ GEMINI_API_KEY successfully loaded.");
-    console.log(`✓ Using model: ${MODEL_NAME}`);
+    console.log("INFO: OCR_API_KEY successfully loaded."); 
 }
 
 const app = express();
-
-// 2. Serve the static client file (index.html)
 app.use(express.static(path.join(__dirname, 'public')));
-
-// 3. Fallback to serve index.html for any route
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// 4. Start the HTTP server
 const server = app.listen(PORT, () => {
-    console.log(`✓ HTTP Server listening on port ${PORT}`);
+    console.log(`HTTP Server listening on port ${PORT}`);
 });
 
-// 5. Initialize WebSocket Server
 const wss = new WebSocketServer({ server });
 
-// 6. Function to call Gemini Vision API using official format from documentation
+// 2. Function to call OCR.space API
 async function recognizeSanskritText(base64ImageData) {
-    if (!API_KEY) {
-        console.error("API Key is missing at call time. Check environment configuration.");
-        return "Recognition Failed: API Key Missing.";
+    if (!OCR_API_KEY) {
+        return "Recognition Failed: OCR API Key Missing or not loaded.";
+    }
+
+    // Check data size before making an API call (minimal drawing check)
+    if (base64ImageData.length < 10000) { 
+        console.warn("Image data is very small. Likely blank canvas.");
+        return "Recognition Failed: Please write clearly before recognizing.";
     }
     
-    // Check for blank/minimal canvas
-    if (base64ImageData.length < 5000) { 
-        console.warn("Image data is very small. User likely submitted a blank or near-blank canvas.");
-        return "Recognition Failed: Please write clearly (ensure dark, thick lines) before recognizing.";
-    }
+    console.log("Attempting to recognize image using OCR.space...");
 
-    console.log(`📤 Attempting to recognize image... (${base64ImageData.length} bytes)`);
-
-    // Clean and prepare the base64 data
-    const cleanBase64 = base64ImageData.replace(/^data:image\/png;base64,/, '');
-
-    // Official API request format from documentation
-    const payload = {
-        contents: [{
-            parts: [
-                {
-                    text: "You are an OCR system specialized in Sanskrit Devanagari script. Carefully analyze the handwritten text in this image and transcribe ONLY the Sanskrit characters you can clearly recognize. Output only the Devanagari text, nothing else. If no clear text is visible or the image is blank, respond with exactly: NO_TEXT"
-                },
-                {
-                    inline_data: {
-                        mime_type: "image/png",
-                        data: cleanBase64
-                    }
-                }
-            ]
-        }],
-        generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-            topK: 1,
-            topP: 0.95
-        },
-        safetySettings: [
-            {
-                category: "HARM_CATEGORY_HARASSMENT",
-                threshold: "BLOCK_NONE"
-            },
-            {
-                category: "HARM_CATEGORY_HATE_SPEECH",
-                threshold: "BLOCK_NONE"
-            },
-            {
-                category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                threshold: "BLOCK_NONE"
-            },
-            {
-                category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-                threshold: "BLOCK_NONE"
-            }
-        ]
-    };
+    const formData = new URLSearchParams();
+    // OCR.space accepts the Base64 string directly with the header
+    formData.append('base64Image', base64ImageData); 
+    
+    // Devanagari script is used for Sanskrit, Hindi, etc. The code for Hindi is 'hin'.
+    // OCR.space lists 'hin' (Hindi) which uses Devanagari script, the best available option.
+    formData.append('language', 'hin'); 
+    
+    // Set engine to 2 which is often better for complex scripts, though sometimes slower.
+    formData.append('ocrEngine', 2); 
+    
+    // Note: OCR.space has a rate limit of 500 requests/day on the free tier.
 
     try {
-        const response = await fetch(API_URL, {
+        const response = await fetch(OCR_API_URL, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'x-goog-api-key': API_KEY  // Official header format
-            },
-            body: JSON.stringify(payload)
+            headers: { 'apikey': OCR_API_KEY }, // API Key sent as a header
+            body: formData,
         });
 
         const result = await response.json();
         
-        // Enhanced error handling
-        if (!response.ok) {
-            console.error(`❌ API Request Failed (HTTP ${response.status}):`);
-            console.error(JSON.stringify(result, null, 2));
-            
-            if (response.status === 400) {
-                if (result.error?.message?.includes("API key")) {
-                    return "Recognition Failed: Invalid API key. Check your GEMINI_API_KEY.";
-                }
-                if (result.error?.message?.includes("model") || result.error?.message?.includes("not found")) {
-                    return `Recognition Failed: Model '${MODEL_NAME}' not available. Check API access.`;
-                }
-                return `Recognition Failed: Bad Request - ${result.error?.message || 'Unknown error'}`;
-            }
-            if (response.status === 403) {
-                return "Recognition Failed: API key lacks permission or billing not enabled.";
-            }
-            if (response.status === 429) {
-                return "Recognition Failed: Rate limit exceeded. Try again in a moment.";
-            }
-            if (response.status === 500 || response.status === 503) {
-                return "Recognition Failed: Google API server error. Try again later.";
-            }
-            return `Recognition Failed: HTTP Error ${response.status}`;
+        if (!response.ok || result.IsErroredOnProcessing) {
+            console.error('OCR.space API Error:', result.ErrorMessage || result);
+            return `Recognition Failed: ${result.ErrorMessage ? result.ErrorMessage[0] : 'API Error. Check server logs.'}`;
+        }
+        
+        let recognizedText = '';
+        
+        if (result.ParsedResults && result.ParsedResults.length > 0) {
+            // Extract the recognized text from the first result block
+            recognizedText = result.ParsedResults[0].ParsedText.trim();
         }
 
-        // Log the full response for debugging
-        console.log("📥 API Response received");
-        
-        // Check for safety filtering
-        if (result.candidates?.[0]?.finishReason === 'SAFETY') {
-            console.warn("⚠ Content was filtered by safety settings");
-            return "Recognition Failed: Content filtered by safety settings.";
-        }
-        
-        // Extract recognized text from response
-        const recognizedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        
         if (recognizedText) {
-            const trimmedText = recognizedText.trim();
-            
-            // Handle explicit failure token
-            if (trimmedText === 'NO_TEXT') {
-                console.warn("⚠ Model returned NO_TEXT - no legible text detected");
-                return "Recognition Failed: No legible text detected. Please write more clearly.";
-            }
-
-            console.log(`✅ Recognition successful: ${trimmedText}`);
-            return trimmedText;
-            
+            console.log(`Recognition Result: ${recognizedText}`);
+            return recognizedText;
         } else {
-            console.error("❌ API Response missing text candidate");
-            console.error("Full response:", JSON.stringify(result, null, 2));
-            return "Recognition Failed: Empty response from model.";
+            console.warn("OCR.space returned no parsed text for the image.");
+            return "Recognition Failed: Illegible handwriting or no text found.";
         }
 
     } catch (error) {
-        console.error("❌ Error during Gemini API call:", error);
-        
-        if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            return "Recognition Failed: Network error. Check internet connection.";
-        }
-        if (error instanceof SyntaxError) {
-            return "Recognition Failed: Invalid JSON response from API.";
-        }
-        return `Recognition Failed: ${error.message}`;
+        console.error("Error during OCR.space API call (Network/Parse):", error);
+        return "Recognition Failed: Server Network Error or JSON Parse Failure.";
     }
 }
 
-// 7. WebSocket Connection Handling
+// 3. WebSocket Connection Handling
 wss.on('connection', function connection(ws) {
-    console.log('✓ Client connected. Total clients:', wss.clients.size);
+    console.log('Client connected. Total clients:', wss.clients.size);
     
     ws.on('message', async function incoming(message) {
         const messageString = message.toString();
@@ -188,47 +100,29 @@ wss.on('connection', function connection(ws) {
         try {
             const data = JSON.parse(messageString);
 
-            if (data.type === 'recognize_image') {
-                console.log('📝 Recognition request received');
+            if (data.type === 'recognize_image' && data.image) {
                 const base64Image = data.image;
                 
-                // Perform Recognition
+                // 1. Perform Recognition
                 const recognizedText = await recognizeSanskritText(base64Image);
 
-                // Broadcast the Recognized Text to all connected clients
-                console.log(`📤 Broadcasting result to ${wss.clients.size} client(s)`);
+                // 2. Broadcast the Recognized Text
                 wss.clients.forEach(function each(client) {
                     if (client.readyState === client.OPEN) {
-                        client.send(JSON.stringify({ 
-                            type: 'recognized_text', 
-                            text: recognizedText 
-                        }));
+                        client.send(JSON.stringify({ type: 'display_text', text: recognizedText }));
                     }
                 });
 
             } else {
-                console.log("⚠ Received unknown message type:", data.type);
+                console.log("Received unknown message type or empty text.");
             }
 
         } catch (e) {
-            console.error('❌ Error processing message:', e);
-            ws.send(JSON.stringify({ 
-                type: 'error', 
-                message: 'Server error processing request' 
-            }));
+            console.error('Error processing incoming message:', e);
         }
     });
 
     ws.on('close', () => {
-        console.log('✗ Client disconnected. Remaining clients:', wss.clients.size);
-    });
-
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        console.log('Client disconnected.');
     });
 });
-
-console.log('\n🚀 Sanskrit Handwriting Recognition Server Ready!');
-console.log(`📍 Local: http://localhost:${PORT}`);
-console.log(`🔑 API Key Status: ${API_KEY ? 'Loaded' : 'MISSING'}`);
-console.log(`🤖 Model: ${MODEL_NAME}\n`);

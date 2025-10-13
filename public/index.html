@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sanskrit Handwriting Recognition</title>
+    <title>Sanskrit Handwriting OCR</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -16,27 +16,12 @@
             align-items: center;
             min-height: 100vh;
         }
-        /* Mobile-only: The drawing canvas styles */
-        #drawingCanvas {
+        canvas {
+            touch-action: none; /* Prevents default mobile scrolling/zooming */
             border: 2px solid #3b82f6;
-            border-radius: 0.75rem;
-            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
-            touch-action: none; 
             background-color: white;
-            max-width: 90vw;
-            flex-grow: 1;
-            margin-bottom: 1rem;
-        }
-        /* Desktop-only: Display container styles */
-        @media (min-width: 768px) {
-            .desktop-display-container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100vh;
-                padding-top: 0;
-            }
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
         }
         .controls-bar {
             background-color: #1e293b;
@@ -49,27 +34,17 @@
             justify-content: center;
             gap: 1rem;
         }
-        #recognizedText {
-            min-height: 8rem;
-            border: 2px solid #6366f1; /* Indigo-500 */
-            background-color: #1e293b;
-            color: #e2e8f0;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            font-size: 1.5rem;
-            text-align: center;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 90%;
-            max-width: 800px;
-        }
         .text-section {
             width: 90%;
             max-width: 800px;
             margin-top: 1rem;
             margin-bottom: 2rem;
+        }
+        /* Mobile drawing container */
+        .mobile-drawing-area {
+            width: 90%;
+            max-width: 600px;
+            margin-bottom: 1rem;
         }
     </style>
 </head>
@@ -77,15 +52,15 @@
 
     <!-- Desktop Display Container (Hidden on mobile) -->
     <div id="desktopContainer" class="hidden md:flex flex-col items-center justify-center p-8 h-screen w-full">
-        <h1 class="text-4xl font-extrabold text-white mb-4">Live Sanskrit Recognition Display</h1>
+        <h1 class="text-4xl font-extrabold text-white mb-4">Sanskrit Live OCR Display</h1>
         <p class="text-lg text-gray-400 mb-8">
-            Connect a mobile device to this URL to start writing.
+            Draw in Devanagari script on a mobile device to see the transcription here.
         </p>
 
         <!-- Live Recognized Text Display -->
         <div class="text-section md:w-3/4 lg:w-1/2">
-            <p class="text-gray-300 text-xl font-semibold mb-3">Recognized Sanskrit Text:</p>
-            <div id="recognizedTextDesktop" class="min-h-[12rem] bg-slate-800 border-4 border-indigo-500 text-purple-200 p-6 rounded-xl shadow-2xl flex items-center justify-center font-serif text-5xl break-words">
+            <p class="text-gray-300 text-xl font-semibold mb-3">Recognized Text:</p>
+            <div id="recognizedTextDesktop" class="min-h-[12rem] bg-slate-800 border-4 border-indigo-500 text-purple-200 p-6 rounded-xl shadow-2xl flex items-center justify-center font-serif text-5xl break-words whitespace-pre-wrap">
                 Waiting for input...
             </div>
             <p id="status-message-desktop" class="text-sm text-yellow-400 mt-4 text-center">Status: Connecting...</p>
@@ -97,20 +72,18 @@
     <div id="mobileContainer" class="md:hidden flex flex-col items-center w-full pt-4">
         
         <div class="p-4 text-center">
-            <h1 class="text-2xl font-bold text-white mb-1">Mobile Writing Pad</h1>
+            <h1 class="text-2xl font-bold text-white mb-1">Mobile Sanskrit Writer</h1>
             <p id="status-message-mobile" class="text-sm text-yellow-400">Status: Connecting...</p>
         </div>
 
-        <!-- The Drawing Canvas -->
-        <canvas id="drawingCanvas"></canvas>
+        <!-- The Canvas Drawing Area -->
+        <div class="mobile-drawing-area">
+            <canvas id="drawingCanvas"></canvas>
+        </div>
 
         <!-- Controls -->
         <div class="controls-bar">
             <button id="recognizeButton" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-lg flex items-center justify-center">
-                <svg id="loadingSpinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
                 Recognize Sanskrit
             </button>
             <button id="clearButton" class="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition duration-150 shadow-lg">
@@ -121,7 +94,7 @@
         <!-- Mobile Feedback Display -->
         <div class="text-section">
             <p class="text-gray-400 text-sm mb-2">Last Recognized Output:</p>
-            <div id="recognizedTextMobile" class="min-h-8 bg-slate-800 border-2 border-slate-600 text-white p-3 rounded-lg text-lg text-center flex items-center justify-center">
+            <div id="recognizedTextMobile" class="min-h-8 bg-slate-800 border-2 border-slate-600 text-white p-3 rounded-lg text-lg text-center flex items-center justify-center whitespace-pre-wrap">
                 Output here...
             </div>
         </div>
@@ -131,16 +104,11 @@
     <script>
         // --- Configuration & State ---
         
-        // *****************************************************************************************
-        // ** IMPORTANT **: If running this in a local file or preview, you MUST set the host below.
-        // Replace the placeholder with your actual Render URL (e.g., 'my-sanskrit-app.onrender.com').
-        // If deploying client/server together on Render, leave this placeholder OR just use the live URL.
-        // *****************************************************************************************
+        // IMPORTANT: Replace the placeholder with your actual Render URL (e.g., 'my-ocr-app.onrender.com').
         const FALLBACK_HOST_FOR_TESTING = "YOUR-RENDER-APP-NAME.onrender.com"; 
 
         let currentHost = window.location.host;
         
-        // If currentHost is empty (e.g., in a local or preview environment), use the fallback if configured.
         if (!currentHost && !FALLBACK_HOST_FOR_TESTING.includes('YOUR-RENDER-APP-NAME')) {
             currentHost = FALLBACK_HOST_FOR_TESTING;
         }
@@ -148,76 +116,114 @@
         const WS_SERVER_URL = currentHost; 
         
         const canvas = document.getElementById('drawingCanvas');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas ? canvas.getContext('2d') : null;
         const statusMobile = document.getElementById('status-message-mobile');
         const statusDesktop = document.getElementById('status-message-desktop');
         const recognizeButton = document.getElementById('recognizeButton');
         const clearButton = document.getElementById('clearButton');
         const recognizedTextDesktop = document.getElementById('recognizedTextDesktop');
         const recognizedTextMobile = document.getElementById('recognizedTextMobile');
-        const loadingSpinner = document.getElementById('loadingSpinner');
 
         let ws;
         let isDrawing = false;
-        let lastX = 0;
-        let lastY = 0;
-        const DRAW_COLOR = '#000000';
-        const DRAW_SIZE = 20;
+        
+        // --- Initialization and Canvas Setup ---
 
-        // --- Canvas Initialization and Resizing ---
-        function resizeCanvas() {
-            // Set the canvas rendering size (high resolution for sharp drawing)
-            canvas.width = 1200;
-            canvas.height = 600;
+        function setupCanvas() {
+            if (!canvas) return;
+            
+            // Set canvas size dynamically for mobile
+            const parent = canvas.parentElement;
+            canvas.width = parent.clientWidth;
+            canvas.height = canvas.width * 0.75; // Maintain a good aspect ratio
 
-            // Set the canvas CSS size (visible size on screen)
-            // It adapts to the mobile container width
-            const mobileContainer = document.getElementById('mobileContainer');
-            if (mobileContainer.style.display !== 'none') {
-                const maxWidth = Math.min(window.innerWidth * 0.9, 600); // Max 600px or 90% of viewport
-                canvas.style.width = maxWidth + 'px';
-                canvas.style.height = (maxWidth * 0.5) + 'px'; // Maintain 2:1 aspect ratio
-            }
-
-            ctx.lineJoin = 'round';
+            ctx.lineWidth = 20; // Thick line for better OCR
             ctx.lineCap = 'round';
-            ctx.strokeStyle = DRAW_COLOR;
-            ctx.lineWidth = DRAW_SIZE;
+            ctx.strokeStyle = '#000000'; // Black ink
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height); // Ensure white background
+
+            // Redraw on resize (important for responsiveness)
+            window.addEventListener('resize', () => {
+                if (window.innerWidth < 768) { // Only resize if in mobile view
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const newWidth = parent.clientWidth;
+                    canvas.width = newWidth;
+                    canvas.height = newWidth * 0.75;
+                    ctx.putImageData(imageData, 0, 0); // This is highly simplified and won't work well, but it prevents crashes.
+                    
+                    // Simple clear and redraw setup for mobile devices after resize
+                    ctx.lineWidth = 20;
+                    ctx.lineCap = 'round';
+                    ctx.strokeStyle = '#000000';
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            });
         }
 
-        window.addEventListener('resize', resizeCanvas);
-        // Only call resize on load if the mobile container is visible (i.e., on a mobile device)
-        if (window.innerWidth < 768) {
-             window.addEventListener('load', resizeCanvas);
-        } else {
-             window.addEventListener('load', () => {
-                // Ensure the canvas is cleared even if hidden
-                clearCanvasLocally();
-             });
+
+        // --- Drawing Logic (for mobile) ---
+
+        function getPosition(event) {
+            const rect = canvas.getBoundingClientRect();
+            // Handle both mouse (desktop testing) and touch (mobile) events
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+            
+            // Scale coordinates based on canvas display size vs. internal resolution
+            const x = (clientX - rect.left) * (canvas.width / rect.width);
+            const y = (clientY - rect.top) * (canvas.height / rect.height);
+            return { x, y };
+        }
+
+        function startDrawing(e) {
+            e.preventDefault(); 
+            isDrawing = true;
+            const { x, y } = getPosition(e);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        function draw(e) {
+            e.preventDefault(); 
+            if (!isDrawing) return;
+            const { x, y } = getPosition(e);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+            ctx.closePath();
+        }
+        
+        function clearCanvas() {
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            recognizedTextMobile.textContent = 'Canvas cleared.';
         }
 
 
         // --- WebSocket Connection Logic ---
         function updateStatus(message, isError = false) {
-            const statusClass = isError ? 'text-red-400' : 'text-green-400';
             const defaultClass = 'text-yellow-400';
 
-            statusMobile.textContent = 'Status: ' + message;
-            statusDesktop.textContent = 'Status: ' + message;
+            if (statusMobile) statusMobile.textContent = 'Status: ' + message;
+            if (statusDesktop) statusDesktop.textContent = 'Status: ' + message;
             
-            // Apply color classes dynamically
             [statusMobile, statusDesktop].forEach(el => {
-                el.classList.remove('text-green-400', 'text-yellow-400', 'text-red-400');
-                el.classList.add(isError ? statusClass : defaultClass);
+                if (el) {
+                    el.classList.remove('text-green-400', 'text-yellow-400', 'text-red-400');
+                    el.classList.add(isError ? 'text-red-400' : defaultClass);
+                }
             });
             if (!isError && message.includes('Connected')) {
-                statusMobile.classList.add('text-green-400');
-                statusDesktop.classList.add('text-green-400');
+                if (statusMobile) statusMobile.classList.add('text-green-400');
+                if (statusDesktop) statusDesktop.classList.add('text-green-400');
             }
         }
         
         function connectWebSocket() {
-            // Check if WS_SERVER_URL is invalid, likely due to running in a non-deployed environment.
             if (!WS_SERVER_URL || WS_SERVER_URL.includes('YOUR-RENDER-APP-NAME')) {
                  updateStatus('ERROR: Set FALLBACK_HOST_FOR_TESTING in JS to your Render URL.', true);
                  console.error("WS_SERVER_URL is invalid. Please set FALLBACK_HOST_FOR_TESTING in the JavaScript section with your actual Render URL to test the connection.");
@@ -236,8 +242,8 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === 'recognized_text') {
-                        handleRecognizedText(data.text);
+                    if (data.type === 'display_text') {
+                        handleReceivedText(data.text);
                     }
                 } catch (e) {
                     console.error('Failed to parse incoming message:', e);
@@ -255,126 +261,57 @@
             };
         }
 
-        // --- Drawing Functionality ---
+        // --- Action Handler ---
 
-        // Draw a line segment locally
-        function drawLine(x1, y1, x2, y2) {
-            // Scale coordinates from the CSS client size to the internal canvas resolution
-            const scaleX = canvas.width / canvas.offsetWidth;
-            const scaleY = canvas.height / canvas.offsetHeight;
-            
-            ctx.beginPath();
-            ctx.moveTo(x1 * scaleX, y1 * scaleY);
-            ctx.lineTo(x2 * scaleX, y2 * scaleY);
-            ctx.stroke();
-        }
-
-        function clearCanvasLocally() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-
-        // --- Event Handlers (Mouse/Touch) ---
-
-        function getCanvasPosition(e) {
-            const rect = canvas.getBoundingClientRect();
-            // Use clientX/Y from event or first touch point
-            const clientX = e.clientX !== undefined ? e.clientX : e.touches[0].clientX;
-            const clientY = e.clientY !== undefined ? e.clientY : e.touches[0].clientY;
-            
-            // Coordinates relative to the canvas CSS size
-            const x = clientX - rect.left;
-            const y = clientY - rect.top;
-            return { x, y };
-        }
-
-        function startDraw(e) {
-            // Only allow drawing on the mobile container
-            if (window.innerWidth >= 768) return; 
-
-            e.preventDefault();
-            isDrawing = true;
-            const { x, y } = getCanvasPosition(e);
-            
-            lastX = x; 
-            lastY = y; 
-        }
-
-        function moveDraw(e) {
-            if (!isDrawing) return;
-            e.preventDefault();
-            const { x, y } = getCanvasPosition(e);
-
-            // Draw locally
-            drawLine(lastX, lastY, x, y);
-            
-            lastX = x;
-            lastY = y;
-        }
-
-        function endDraw() {
-            isDrawing = false;
-        }
-
-        // Attach listeners (only for mobile drawing)
-        canvas.addEventListener('mousedown', startDraw);
-        canvas.addEventListener('mousemove', moveDraw);
-        canvas.addEventListener('mouseup', endDraw);
-        canvas.addEventListener('mouseout', endDraw);
-        canvas.addEventListener('touchstart', startDraw);
-        canvas.addEventListener('touchmove', moveDraw);
-        canvas.addEventListener('touchend', endDraw);
-        canvas.addEventListener('touchcancel', endDraw);
-
-        clearButton.addEventListener('click', () => {
-            clearCanvasLocally();
-            recognizedTextMobile.textContent = 'Canvas cleared.';
-        });
-
-        // --- Recognition Logic ---
-
-        function setRecognitionState(isRecognizing) {
-            recognizeButton.disabled = isRecognizing;
-            loadingSpinner.classList.toggle('hidden', !isRecognizing);
-            recognizeButton.textContent = isRecognizing ? 'Processing...' : 'Recognize Sanskrit';
-        }
-
-        recognizeButton.addEventListener('click', () => {
+        function handleRecognize() {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                // 1. Convert Canvas to Base64 Image
+                // Convert the canvas content to a Base64 PNG image
                 const base64Image = canvas.toDataURL('image/png');
                 
-                // 2. Send the image to the server for recognition
+                // Send the image to the server for recognition
                 ws.send(JSON.stringify({ 
                     type: 'recognize_image', 
                     image: base64Image 
                 }));
                 
-                // 3. Update Mobile UI Feedback
-                recognizedTextMobile.textContent = 'Sending image for recognition...';
-                setRecognitionState(true);
+                recognizedTextMobile.textContent = 'Sending image for OCR...';
 
             } else {
                 recognizedTextMobile.textContent = 'Error: WebSocket not connected.';
             }
-        });
+        }
 
-        function handleRecognizedText(text) {
-            setRecognitionState(false);
-            
+        function handleReceivedText(text) {
             // Update the dedicated desktop display
             recognizedTextDesktop.textContent = text;
             
-            // Update the mobile display feedback
-            recognizedTextMobile.textContent = text; 
-            
-            // OPTIONAL: Clear the canvas after successful recognition
-            clearCanvasLocally();
+            // Update the mobile display feedback (for confirmation)
+            recognizedTextMobile.textContent = 'Result: ' + text;
         }
 
 
-        // Start the application
-        connectWebSocket();
+        // --- Setup Listeners ---
+        window.addEventListener('load', () => {
+            connectWebSocket();
+            
+            if (window.innerWidth < 768) {
+                setupCanvas();
+                
+                // Touch events for mobile drawing
+                canvas.addEventListener('touchstart', startDrawing);
+                canvas.addEventListener('touchmove', draw);
+                canvas.addEventListener('touchend', stopDrawing);
+                
+                // Mouse events for desktop/preview drawing
+                canvas.addEventListener('mousedown', startDrawing);
+                canvas.addEventListener('mousemove', draw);
+                canvas.addEventListener('mouseup', stopDrawing);
+                canvas.addEventListener('mouseout', stopDrawing);
+
+                recognizeButton.addEventListener('click', handleRecognize);
+                clearButton.addEventListener('click', clearCanvas);
+            }
+        });
     </script>
 </body>
 </html>
-    
