@@ -3,11 +3,11 @@
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const path = require('path');
-const fetch = require('node-fetch'); // We need to ensure 'node-fetch' is available for API calls
+const fetch = require('node-fetch');
 
 // 1. Initialize Express App and Configuration
 const PORT = process.env.PORT || 8080;
-const OCR_API_KEY = process.env.OCR_API_KEY || ''; // Read API key from Render Environment Variable
+const OCR_API_KEY = process.env.OCR_API_KEY || '';
 const OCR_API_URL = 'https://api.ocr.space/parse/image';
 
 if (!OCR_API_KEY) {
@@ -34,59 +34,113 @@ async function recognizeSanskritText(base64ImageData) {
         return "Recognition Failed: OCR API Key Missing or not loaded.";
     }
 
-    // Check data size before making an API call (minimal drawing check)
-    if (base64ImageData.length < 10000) { 
+    // Remove data URI prefix if present
+    const base64Clean = base64ImageData.replace(/^data:image\/\w+;base64,/, '');
+    
+    // Check data size before making an API call
+    if (base64Clean.length < 1000) { 
         console.warn("Image data is very small. Likely blank canvas.");
         return "Recognition Failed: Please write clearly before recognizing.";
     }
     
     console.log("Attempting to recognize image using OCR.space...");
+    console.log("Image data length:", base64Clean.length);
 
     const formData = new URLSearchParams();
-    // OCR.space accepts the Base64 string directly with the header
-    formData.append('base64Image', base64ImageData); 
+    formData.append('base64Image', `data:image/png;base64,${base64Clean}`);
     
-    // Devanagari script is used for Sanskrit, Hindi, etc. The code for Hindi is 'hin'.
-    // OCR.space lists 'hin' (Hindi) which uses Devanagari script, the best available option.
-    formData.append('language', 'hin'); 
-    
-    // Set engine to 2 which is often better for complex scripts, though sometimes slower.
-    formData.append('ocrEngine', 2); 
-    
-    // Note: OCR.space has a rate limit of 500 requests/day on the free tier.
+    // Try multiple language configurations
+    formData.append('language', 'hin'); // Hindi/Devanagari
+    formData.append('isOverlayRequired', 'false');
+    formData.append('detectOrientation', 'true');
+    formData.append('scale', 'true');
+    formData.append('OCREngine', '2'); // Try engine 2 first
 
     try {
         const response = await fetch(OCR_API_URL, {
             method: 'POST',
-            headers: { 'apikey': OCR_API_KEY }, // API Key sent as a header
+            headers: { 
+                'apikey': OCR_API_KEY,
+            },
             body: formData,
         });
 
         const result = await response.json();
         
-        if (!response.ok || result.IsErroredOnProcessing) {
-            console.error('OCR.space API Error:', result.ErrorMessage || result);
-            return `Recognition Failed: ${result.ErrorMessage ? result.ErrorMessage[0] : 'API Error. Check server logs.'}`;
+        console.log("OCR.space Response:", JSON.stringify(result, null, 2));
+        
+        if (!response.ok) {
+            console.error('OCR.space HTTP Error:', response.status, response.statusText);
+            return `Recognition Failed: HTTP ${response.status} - ${response.statusText}`;
+        }
+        
+        if (result.IsErroredOnProcessing) {
+            const errorMsg = result.ErrorMessage ? result.ErrorMessage.join(', ') : 'Unknown error';
+            console.error('OCR.space Processing Error:', errorMsg);
+            
+            // If engine 2 fails, try engine 1
+            if (errorMsg.includes('Engine2') || errorMsg.includes('engine')) {
+                console.log("Retrying with Engine 1...");
+                return await recognizeSanskritTextWithEngine1(base64Clean);
+            }
+            
+            return `Recognition Failed: ${errorMsg}`;
         }
         
         let recognizedText = '';
         
         if (result.ParsedResults && result.ParsedResults.length > 0) {
-            // Extract the recognized text from the first result block
             recognizedText = result.ParsedResults[0].ParsedText.trim();
+            
+            // Check for exit code
+            const exitCode = result.ParsedResults[0].FileParseExitCode;
+            if (exitCode !== 1) {
+                console.warn(`Parse exit code: ${exitCode}`);
+            }
         }
 
-        if (recognizedText) {
+        if (recognizedText && recognizedText.length > 0) {
             console.log(`Recognition Result: ${recognizedText}`);
             return recognizedText;
         } else {
             console.warn("OCR.space returned no parsed text for the image.");
-            return "Recognition Failed: Illegible handwriting or no text found.";
+            return "Recognition Failed: No text detected. Try writing larger and clearer.";
         }
 
     } catch (error) {
-        console.error("Error during OCR.space API call (Network/Parse):", error);
-        return "Recognition Failed: Server Network Error or JSON Parse Failure.";
+        console.error("Error during OCR.space API call:", error.message);
+        console.error("Full error:", error);
+        return `Recognition Failed: ${error.message}`;
+    }
+}
+
+// Fallback function with engine 1
+async function recognizeSanskritTextWithEngine1(base64Clean) {
+    const formData = new URLSearchParams();
+    formData.append('base64Image', `data:image/png;base64,${base64Clean}`);
+    formData.append('language', 'hin');
+    formData.append('isOverlayRequired', 'false');
+    formData.append('OCREngine', '1'); // Engine 1
+
+    try {
+        const response = await fetch(OCR_API_URL, {
+            method: 'POST',
+            headers: { 'apikey': OCR_API_KEY },
+            body: formData,
+        });
+
+        const result = await response.json();
+        console.log("OCR.space Engine 1 Response:", JSON.stringify(result, null, 2));
+        
+        if (result.ParsedResults && result.ParsedResults.length > 0) {
+            const text = result.ParsedResults[0].ParsedText.trim();
+            if (text) return text;
+        }
+        
+        return "Recognition Failed: No text detected with either engine.";
+    } catch (error) {
+        console.error("Engine 1 fallback error:", error.message);
+        return "Recognition Failed: Both engines failed.";
     }
 }
 
@@ -103,26 +157,41 @@ wss.on('connection', function connection(ws) {
             if (data.type === 'recognize_image' && data.image) {
                 const base64Image = data.image;
                 
-                // 1. Perform Recognition
+                // Send acknowledgment
+                ws.send(JSON.stringify({ 
+                    type: 'display_text', 
+                    text: 'Processing...' 
+                }));
+                
+                // Perform Recognition
                 const recognizedText = await recognizeSanskritText(base64Image);
 
-                // 2. Broadcast the Recognized Text
+                // Broadcast the Recognized Text
                 wss.clients.forEach(function each(client) {
                     if (client.readyState === client.OPEN) {
-                        client.send(JSON.stringify({ type: 'display_text', text: recognizedText }));
+                        client.send(JSON.stringify({ 
+                            type: 'display_text', 
+                            text: recognizedText 
+                        }));
                     }
                 });
 
             } else {
-                console.log("Received unknown message type or empty text.");
+                console.log("Received unknown message type or missing image data.");
             }
 
         } catch (e) {
             console.error('Error processing incoming message:', e);
+            ws.send(JSON.stringify({ 
+                type: 'display_text', 
+                text: 'Server Error: ' + e.message 
+            }));
         }
     });
 
     ws.on('close', () => {
-        console.log('Client disconnected.');
+        console.log('Client disconnected. Remaining clients:', wss.clients.size);
     });
 });
+
+console.log("WebSocket server ready and waiting for connections...");
